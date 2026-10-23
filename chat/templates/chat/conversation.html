@@ -440,12 +440,26 @@
         getOrCreatePqcKeyPair,
         encryptMessage,
         decryptMessage
-    } from "{% static 'chat/dist/crypto.mjs' %}?v=4";
+    } from "{% static 'chat/dist/crypto.mjs' %}?v=5";
 
     const page = document.body;
     const conversationId = page.dataset.conversationId;
-    const recipientId = page.dataset.recipientId;
     const currentUserId = Number(page.dataset.userId);
+
+    function getCurrentDeviceId() {
+        const storageKey =
+            `pqc-chat-device-id:${encodeURIComponent(page.dataset.username)}`;
+        let deviceId = localStorage.getItem(storageKey);
+
+        if (!deviceId) {
+            deviceId = crypto.randomUUID();
+            localStorage.setItem(storageKey, deviceId);
+        }
+
+        return deviceId;
+    }
+
+    const currentDeviceId = getCurrentDeviceId();
 
     const form = document.getElementById("message-form");
     const passphraseInput = document.getElementById("key-passphrase");
@@ -462,15 +476,20 @@
     ).value;
 
     let keyPair = null;
-    let recipientPublicKey = null;
+    let currentDeviceKeyId = null;
+    let activeDeviceKeys = [];
     let busy = false;
-    let keyRegistrationConflict = false;
     let loadingMessages = false;
     let initialRenderCompleted = false;
     const renderedMessageIds = new Set();
 
     function setStatus(message) {
         status.textContent = message;
+    }
+
+    function setComposerEnabled(enabled) {
+        messageInput.disabled = !enabled;
+        sendButton.disabled = !enabled;
     }
 
     function bytesToBase64(bytes) {
@@ -483,14 +502,109 @@
         return btoa(binary);
     }
 
+    function base64ToBytes(value) {
+        if (typeof value !== "string" || !value) {
+            throw new Error("A public key was missing or invalid.");
+        }
+        const binary = atob(value);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    }
+
+    async function fingerprintFor(publicKeyBytes) {
+        const digest = new Uint8Array(
+            await crypto.subtle.digest("SHA-256", publicKeyBytes)
+        );
+        return Array.from(digest)
+            .map(byte => byte.toString(16).padStart(2, "0"))
+            .join("");
+    }
+
     async function responseJson(response) {
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            throw new Error(`Server returned an invalid response (${response.status}).`);
+        }
         if (!response.ok) {
             throw new Error(
                 data.error || `Request failed (${response.status}).`
             );
         }
         return data;
+    }
+
+    async function registerCurrentDeviceKey(publicKey) {
+        const response = await fetch("/api/device-keys/register/", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify({
+                device_id: currentDeviceId,
+                device_name: "Browser",
+                algorithm: "ML-KEM-768",
+                public_key: bytesToBase64(publicKey)
+            })
+        });
+        return responseJson(response);
+    }
+
+    async function fetchAndValidateDeviceKeys() {
+        const response = await fetch(
+            `/api/conversations/${encodeURIComponent(conversationId)}/device-keys/`,
+            { credentials: "same-origin" }
+        );
+        const data = await responseJson(response);
+
+        if (!Array.isArray(data.device_keys)) {
+            throw new Error("Device-key response has an invalid format.");
+        }
+
+        const validatedKeys = [];
+        for (const item of data.device_keys) {
+            if (item.algorithm !== "ML-KEM-768") {
+                throw new Error("A device uses an unsupported key algorithm.");
+            }
+            const rawPublicKey = base64ToBytes(item.public_key);
+            if (rawPublicKey.length !== 1184) {
+                throw new Error("A device public key has an invalid length.");
+            }
+            const fingerprint = await fingerprintFor(rawPublicKey);
+            if (fingerprint !== item.fingerprint) {
+                throw new Error(
+                    `Public-key fingerprint mismatch for device ${item.id}.`
+                );
+            }
+            validatedKeys.push(item);
+        }
+
+        const myKey = validatedKeys.find(item =>
+            Number(item.user_id) === currentUserId &&
+            item.device_id === currentDeviceId
+        );
+
+        if (!myKey) {
+            throw new Error("This browser's registered device key is not in the distribution list.");
+        }
+        if (Number(myKey.id) !== Number(currentDeviceKeyId)) {
+            throw new Error("The registered device-key ID changed. Unlock again and retry.");
+        }
+        if (myKey.public_key !== bytesToBase64(keyPair.publicKey)) {
+            throw new Error("The server's key for this device does not match the local public key.");
+        }
+
+        if (!validatedKeys.some(item => Number(item.user_id) !== currentUserId)) {
+            throw new Error("No active recipient device key is registered for this conversation.");
+        }
+
+        return validatedKeys;
     }
 
     function clearServerRenderedPlaceholders() {
@@ -531,41 +645,54 @@
     }
 
     async function loadAndRenderMessages() {
-        if (!keyPair?.secretKey || loadingMessages) return;
+        if (!keyPair?.secretKey || !currentDeviceId || loadingMessages) return;
 
         loadingMessages = true;
         let newMessagesCount = 0;
 
         try {
-            const response = await fetch(
-                `/conversation/${encodeURIComponent(conversationId)}/messages/`,
+            const deviceResponse = await fetch(
+                `/api/conversations/${encodeURIComponent(conversationId)}` +
+                `/device-messages/?device_id=${encodeURIComponent(currentDeviceId)}`,
                 { credentials: "same-origin" }
             );
-            const data = await responseJson(response);
-
+            const data = await responseJson(deviceResponse);
             if (!Array.isArray(data.messages)) {
-                throw new Error("The messages response has an invalid format.");
-            }
-            if (data.messages.length === 0) {
-                const existingRows = messageArea.querySelectorAll(".message-row");
-                existingRows.forEach(row => row.remove());
-                showEmptyState();
-            } else {
-                document.getElementById("empty-messages")?.remove();
+                throw new Error("Device messages response has an invalid format.");
             }
 
-            // On the first successful fetch, remove the server's placeholder
-            // rows but preserve the privacy/security notice.
+            // Fetch old-format messages only for backward compatibility. The
+            // UI uses them only if no device envelopes exist for that message.
+            let legacyById = new Map();
+            try {
+                const legacyResponse = await fetch(
+                    `/conversation/${encodeURIComponent(conversationId)}/messages/`,
+                    { credentials: "same-origin" }
+                );
+                const legacyData = await responseJson(legacyResponse);
+                if (Array.isArray(legacyData.messages)) {
+                    legacyById = new Map(
+                        legacyData.messages.map(item => [String(item.id), item])
+                    );
+                }
+            } catch (legacyError) {
+                console.warn("Legacy message compatibility fetch failed.");
+            }
+
             if (!initialRenderCompleted) {
                 clearServerRenderedPlaceholders();
                 initialRenderCompleted = true;
             }
 
+            if (data.messages.length === 0) {
+                messageArea.querySelectorAll(".message-row").forEach(row => row.remove());
+                showEmptyState();
+            } else {
+                document.getElementById("empty-messages")?.remove();
+            }
+
             for (const message of data.messages) {
                 const messageId = String(message.id);
-
-                // Each message is decrypted at most once per unlock session.
-                // This prevents repeated console warnings on every poll.
                 if (renderedMessageIds.has(messageId)) continue;
 
                 const isMine = Number(message.sender_user_id) === currentUserId;
@@ -587,40 +714,49 @@
                 timestamp.textContent = formatTimestamp(message.created_at);
 
                 try {
-                    if (isMine) {
-                        if (!message.sender_copy) {
-                            content.textContent =
-                                "This older message has no encrypted sender copy.";
-                        } else {
-                            content.textContent = await decryptMessage(
-                                keyPair.secretKey,
-                                message.sender_copy
-                            );
-                        }
-                    } else {
+                    if (message.delivery_available) {
                         content.textContent = await decryptMessage(
                             keyPair.secretKey,
                             message
                         );
+                    } else if (message.has_device_envelopes) {
+                        content.textContent =
+                            "This message was not addressed to this device. It cannot be decrypted on this device.";
+                    } else {
+                        const legacyMessage = legacyById.get(messageId);
+                        if (!legacyMessage) {
+                            content.textContent =
+                                "No encrypted copy is available for this device.";
+                        } else if (isMine) {
+                            if (!legacyMessage.sender_copy) {
+                                content.textContent =
+                                    "This older message has no encrypted sender copy.";
+                            } else {
+                                content.textContent = await decryptMessage(
+                                    keyPair.secretKey,
+                                    legacyMessage.sender_copy
+                                );
+                            }
+                        } else {
+                            content.textContent = await decryptMessage(
+                                keyPair.secretKey,
+                                legacyMessage
+                            );
+                        }
                     }
                 } catch (error) {
-                    // Log only the message ID and direction, never keys or plaintext.
                     console.warn(
-                        isMine
-                            ? "Sender-copy decryption failed for message ID:"
-                            : "Recipient-message decryption failed for message ID:",
+                        "Message decryption failed for message ID:",
                         message.id
                     );
-                    content.textContent = isMine
-                        ? "Unable to decrypt your saved message copy. The local private key may not match the key used for this message."
-                        : "Unable to decrypt this message. The local private key may not match the recipient key used when it was sent.";
+                    content.textContent =
+                        "Unable to decrypt this message. The local private key may not match the key used for this message.";
                 }
 
                 bubble.appendChild(sender);
                 bubble.appendChild(content);
                 if (timestamp.textContent) bubble.appendChild(timestamp);
 
-                // Show a clearly visible Unsend button only on the current user's messages.
                 if (isMine) {
                     const actions = document.createElement("div");
                     actions.className = "message-actions";
@@ -629,7 +765,10 @@
                     unsendButton.type = "button";
                     unsendButton.className = "message-unsend-button";
                     unsendButton.textContent = "Unsend";
-                    unsendButton.setAttribute("aria-label", "Unsend this message for everyone");
+                    unsendButton.setAttribute(
+                        "aria-label",
+                        "Unsend this message for everyone"
+                    );
                     unsendButton.addEventListener("click", async () => {
                         const confirmed = window.confirm(
                             "Unsend this message for everyone? This permanently deletes it."
@@ -659,24 +798,17 @@
 
                 row.appendChild(bubble);
                 messageArea.appendChild(row);
-
-                // Cache both successful and failed attempts so polling does not
-                // repeatedly retry the same message while this key is unlocked.
                 renderedMessageIds.add(messageId);
                 newMessagesCount += 1;
             }
 
-            if (!initialRenderCompleted || newMessagesCount > 0) {
-                setStatus(`Loaded ${data.messages.length} message(s).`);
-            }
             if (newMessagesCount > 0) {
+                setStatus(`Loaded ${data.messages.length} message(s) for this device.`);
                 messageArea.scrollTop = messageArea.scrollHeight;
             }
         } catch (error) {
-            console.error("Could not load messages:", error);
-            setStatus(
-                "Messages could not be loaded. " + (error.message || "")
-            );
+            console.error("Could not load device messages:", error);
+            setStatus("Messages could not be loaded. " + (error.message || ""));
         } finally {
             loadingMessages = false;
         }
@@ -687,11 +819,10 @@
 
         busy = true;
         unlockButton.disabled = true;
-        sendButton.disabled = true;
-        messageInput.disabled = true;
+        setComposerEnabled(false);
         keyPair = null;
-        recipientPublicKey = null;
-        keyRegistrationConflict = false;
+        currentDeviceKeyId = null;
+        activeDeviceKeys = [];
         renderedMessageIds.clear();
         initialRenderCompleted = false;
 
@@ -701,96 +832,50 @@
                 throw new Error("Use a passphrase with at least 12 characters.");
             }
 
-            setStatus("Unlocking your local key…");
+            setStatus("Unlocking your locally stored ML-KEM-768 key…");
             keyPair = await getOrCreatePqcKeyPair(passphrase);
-            const fingerprintBytes = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", keyPair.publicKey)
-);
 
-const localFingerprint = Array.from(fingerprintBytes)
-    .map(byte => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 24);
+            const localPublicKeyBase64 = bytesToBase64(keyPair.publicKey);
+            const localFingerprint = await fingerprintFor(keyPair.publicKey);
 
-console.info("PQC KEY CHECK:", {
-    username: page.dataset.username,
-    fingerprint: localFingerprint
-});
+            setStatus("Registering this browser's public key…");
+            const deviceRegistration = await registerCurrentDeviceKey(keyPair.publicKey);
+            currentDeviceKeyId = Number(deviceRegistration.device_key_id);
 
-            setStatus("Checking your registered public key…");
-            const registrationResponse = await fetch("/keys/register/", {
-                method: "POST",
-                credentials: "same-origin",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken
-                },
-                body: JSON.stringify({
-                    algorithm: "ML-KEM-768",
-                    public_key: bytesToBase64(keyPair.publicKey)
-                })
+            if (deviceRegistration.fingerprint !== localFingerprint) {
+                throw new Error("The server registered a different public-key fingerprint. Sending is disabled.");
+            }
+
+            console.info("PQC device registered:", {
+                deviceKeyId: currentDeviceKeyId,
+                deviceId: currentDeviceId,
+                fingerprint: localFingerprint
             });
 
-            if (registrationResponse.status === 409) {
-                // Preserve the local key for recovery attempts, but never send
-                // messages while this local key differs from the registered key.
-                keyRegistrationConflict = true;
-                setStatus(
-                    "Recovery mode: this local key differs from the registered key. " +
-                    "Sending is disabled; attempting to decrypt existing messages."
-                );
-            } else {
-                await responseJson(registrationResponse);
-            }
+            setStatus("Retrieving and validating active device public keys…");
+            activeDeviceKeys = await fetchAndValidateDeviceKeys();
 
-            if (!recipientId) {
-                throw new Error("No other participant was found.");
-            }
-
-            setStatus("Retrieving recipient public key…");
-            const keyResponse = await fetch(
-                `/keys/${encodeURIComponent(recipientId)}/`,
-                { credentials: "same-origin" }
+            // The current browser key is confirmed above. Recipients' public-key
+            // fingerprints must still be verified through a trusted separate channel.
+            setStatus(
+                `Device keys ready (${activeDeviceKeys.length} active devices). ` +
+                "Verify recipient fingerprints out of band before trusting this chat."
             );
-            const keyData = await responseJson(keyResponse);
-
-            if (keyData.algorithm !== "ML-KEM-768") {
-                throw new Error("Unsupported recipient key algorithm.");
-            }
-
-            const recipientKeyBytes = atob(keyData.public_key);
-            if (recipientKeyBytes.length !== 1184) {
-                throw new Error("Recipient public key has an invalid length.");
-            }
-
-            recipientPublicKey = keyData.public_key;
             await loadAndRenderMessages();
-
-            if (keyRegistrationConflict) {
-                setStatus(
-                    "Recovery mode: sending is disabled because this local key " +
-                    "differs from the registered key. Existing messages were tested with this local key."
-                );
-            } else {
-                setStatus(
-                    "Key ready. Verify the recipient's key fingerprint out of band before trusting this conversation."
-                );
-            }
-
-            if (!keyRegistrationConflict) messageInput.focus();
+            messageInput.focus();
         } catch (error) {
-            console.error("Unable to prepare encryption:", error);
+            console.error("Unable to prepare multi-device encryption:", error);
             keyPair = null;
-            recipientPublicKey = null;
-            messageInput.disabled = true;
-            sendButton.disabled = true;
+            currentDeviceKeyId = null;
+            activeDeviceKeys = [];
+            setComposerEnabled(false);
             setStatus("Encryption error: " + (error?.message || String(error)));
         } finally {
             busy = false;
             unlockButton.disabled = false;
-            messageInput.disabled = !keyPair || keyRegistrationConflict;
-            sendButton.disabled =
-                !keyPair || !recipientPublicKey || keyRegistrationConflict;
+            setComposerEnabled(
+                Boolean(keyPair && currentDeviceKeyId && activeDeviceKeys.length > 1)
+            );
         }
     }
 
@@ -849,14 +934,14 @@ console.info("PQC KEY CHECK:", {
 
     form.addEventListener("submit", async event => {
         event.preventDefault();
-
         const plaintext = messageInput.value;
+
         if (
             !plaintext.trim() ||
             !keyPair ||
-            !recipientPublicKey ||
-            busy ||
-            keyRegistrationConflict
+            !currentDeviceKeyId ||
+            !activeDeviceKeys.length ||
+            busy
         ) {
             return;
         }
@@ -864,24 +949,28 @@ console.info("PQC KEY CHECK:", {
         busy = true;
         sendButton.disabled = true;
         unlockButton.disabled = true;
-        setStatus("Encrypting message in your browser…");
+        setStatus("Refreshing device list before encryption…");
 
         try {
-            // Encrypt one package for the recipient.
-            const encryptedPackage = await encryptMessage(
-                recipientPublicKey,
-                plaintext
-            );
+            // Refresh keys immediately before sending. The server will reject
+            // a stale or incomplete envelope list if device membership changes.
+            activeDeviceKeys = await fetchAndValidateDeviceKeys();
+            setStatus(`Encrypting a separate package for ${activeDeviceKeys.length} devices…`);
 
-            // Encrypt another package for the sender's own message history.
-            const senderCopyPackage = await encryptMessage(
-                bytesToBase64(keyPair.publicKey),
-                plaintext
-            );
+            const deviceEnvelopes = [];
+            for (const deviceKey of activeDeviceKeys) {
+                const encryptedPackage = await encryptMessage(
+                    deviceKey.public_key,
+                    plaintext
+                );
+                deviceEnvelopes.push({
+                    device_key_id: Number(deviceKey.id),
+                    ...encryptedPackage
+                });
+            }
 
-            setStatus("Sending encrypted packages to Django…");
             const response = await fetch(
-                `/conversation/${encodeURIComponent(conversationId)}/send/`,
+                `/api/conversations/${encodeURIComponent(conversationId)}/device-messages/send/`,
                 {
                     method: "POST",
                     credentials: "same-origin",
@@ -890,37 +979,39 @@ console.info("PQC KEY CHECK:", {
                         "X-CSRFToken": csrfToken
                     },
                     body: JSON.stringify({
-                        ...encryptedPackage,
-                        sender_copy: senderCopyPackage
+                        sender_device_id: currentDeviceId,
+                        device_envelopes: deviceEnvelopes
                     })
                 }
             );
 
             const stored = await responseJson(response);
             messageInput.value = "";
-            setStatus(`Encrypted message ${stored.message_id} stored. Loading messages…`);
+            setStatus(
+                `Encrypted message ${stored.message_id} stored in ` +
+                `${stored.envelope_count} device envelope(s). Loading messages…`
+            );
             await loadAndRenderMessages();
         } catch (error) {
-            console.error("Message send failed:", error);
+            console.error("Multi-device message send failed:", error);
             setStatus(error?.message || "Message could not be sent.");
         } finally {
             busy = false;
             unlockButton.disabled = false;
-            messageInput.disabled = !keyPair || keyRegistrationConflict;
-            sendButton.disabled =
-                !keyPair || !recipientPublicKey || keyRegistrationConflict;
+            setComposerEnabled(
+                Boolean(keyPair && currentDeviceKeyId && activeDeviceKeys.length > 1)
+            );
         }
     });
 
     messageArea.scrollTop = messageArea.scrollHeight;
 
-    // Poll for new messages every five seconds. Existing message IDs are cached,
-    // so decryption failures are not repeatedly retried on every poll.
     setInterval(() => {
         if (keyPair && !busy && !document.hidden) {
             loadAndRenderMessages();
         }
     }, 5000);
 </script>
+
 </body>
 </html>
