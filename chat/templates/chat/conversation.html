@@ -1,0 +1,926 @@
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Conversation | PQC Chat</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            color: #263238;
+            background: #f3f5f8;
+        }
+
+        .app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .topbar {
+            min-height: 64px;
+            background: #fff;
+            border-bottom: 1px solid #e1e6ed;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .brand {
+            font-weight: 700;
+            font-size: 20px;
+            color: #304766;
+        }
+
+        .back-link {
+            color: #45658e;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .chat {
+            flex: 1;
+            min-height: 0;
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            background: #fafbfc;
+            border-left: 1px solid #e1e6ed;
+            border-right: 1px solid #e1e6ed;
+        }
+
+        .chat-header {
+            min-height: 76px;
+            padding: 12px 22px;
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            background: #fff;
+            border-bottom: 1px solid #e1e6ed;
+        }
+
+        .chat-header { position: relative; }
+
+        .chat-menu-container {
+            position: relative;
+            margin-left: auto;
+        }
+
+        .more-options-button {
+            width: 40px;
+            height: 40px;
+            padding: 4px !important;
+            border: 0;
+            border-radius: 8px;
+            background: transparent !important;
+            color: #304766 !important;
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .more-options-button:hover { background: #eef2f7 !important; }
+
+        .conversation-menu,
+        .message-actions-menu {
+            position: absolute;
+            z-index: 50;
+            right: 0;
+            min-width: 190px;
+            padding: 6px;
+            background: #fff;
+            border: 1px solid #dfe5ed;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px #172b4d20;
+        }
+
+        .conversation-menu { top: 46px; }
+        .conversation-menu[hidden],
+        .message-actions-menu[hidden] { display: none !important; }
+
+        .conversation-menu button,
+        .message-actions-menu button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 10px 12px !important;
+            border: 0;
+            border-radius: 7px;
+            color: #263238 !important;
+            background: transparent !important;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .conversation-menu button:hover,
+        .message-actions-menu button:hover { background: #f2f5f9 !important; }
+
+        .conversation-menu .danger,
+        .message-actions-menu .danger { color: #b42318 !important; }
+
+        .message-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 4px;
+            position: relative;
+        }
+
+        .message-actions-toggle {
+            padding: 2px 8px !important;
+            border: 0;
+            background: transparent !important;
+            color: #64748b !important;
+            font-size: 20px;
+            line-height: 1.2;
+        }
+
+        .message-actions-menu { top: 26px; }
+
+        .message-unsend-button {
+            display: inline-flex;
+            align-items: center;
+            margin-top: 7px;
+            padding: 5px 9px !important;
+            border: 1px solid #e8b4b4 !important;
+            border-radius: 7px !important;
+            background: #fff7f7 !important;
+            color: #b42318 !important;
+            font-size: 12px !important;
+            cursor: pointer;
+        }
+
+        .message-unsend-button:hover { background: #ffeded !important; }
+        .message-unsend-button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e7edf6;
+            color: #3d577f;
+            font-weight: 700;
+            font-size: 17px;
+        }
+
+        .header-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: #304766;
+        }
+
+        .header-status {
+            margin-top: 5px;
+            font-size: 12px;
+            color: #7c8999;
+        }
+
+        .messages {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .notice {
+            align-self: center;
+            max-width: 500px;
+            text-align: center;
+            padding: 9px 13px;
+            border-radius: 8px;
+            background: #edf2f8;
+            color: #60738d;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .message-row {
+            display: flex;
+            width: 100%;
+        }
+
+        .message-row.mine { justify-content: flex-end; }
+        .message-row.theirs { justify-content: flex-start; }
+
+        .bubble {
+            max-width: min(75%, 620px);
+            padding: 11px 14px;
+            border: 1px solid #e3e8ef;
+            border-radius: 12px;
+            background: #fff;
+            overflow-wrap: anywhere;
+            box-shadow: 0 1px 2px #00000006;
+        }
+
+        .mine .bubble {
+            background: #e8effb;
+            border-color: #d7e3f6;
+        }
+
+        .sender {
+            font-size: 11px;
+            color: #58739b;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .message-content {
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .timestamp {
+            text-align: right;
+            margin-top: 7px;
+            color: #8390a0;
+            font-size: 10px;
+        }
+
+        .empty-messages {
+            margin: auto;
+            text-align: center;
+            max-width: 360px;
+            padding: 25px;
+            color: #788696;
+            line-height: 1.8;
+            font-size: 14px;
+        }
+
+        .composer {
+            background: white;
+            border-top: 1px solid #e1e6ed;
+            padding: 15px 20px;
+        }
+
+        .composer-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .composer input {
+            flex: 1;
+            min-width: 0;
+            padding: 14px;
+            border: 1px solid #dfe5ed;
+            background: #f7f8fa;
+            border-radius: 9px;
+            font-size: 14px;
+        }
+
+        .composer button {
+            border: 0;
+            border-radius: 8px;
+            padding: 13px 18px;
+            background: #416da9;
+            color: white;
+            cursor: pointer;
+        }
+
+        .composer button:disabled {
+            background: #8c9bb0;
+            cursor: not-allowed;
+        }
+
+        .composer-note {
+            font-size: 11px;
+            color: #8994a2;
+            margin-top: 10px;
+            text-align: center;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 600px) {
+            .topbar { padding: 0 13px; }
+            .brand { font-size: 16px; }
+            .chat-header { padding: 12px; }
+            .messages { padding: 14px 10px; }
+            .bubble { max-width: 88%; }
+            .composer { padding: 10px; }
+            .composer button { padding: 12px; }
+        }
+    </style>
+</head>
+
+<body
+    data-username="{{ request.user.username|escape }}"
+    data-user-id="{{ request.user.id }}"
+    data-conversation-id="{{ conversation.id }}"
+    data-recipient-id="{% for participant in conversation.participants.all %}{% if participant.id != request.user.id %}{{ participant.id }}{% endif %}{% endfor %}"
+>
+<div class="app">
+    <header class="topbar">
+        <div class="brand">🔐 PQC Secure Chat</div>
+        <a class="back-link" href="{% url 'chat_home' %}">← People</a>
+    </header>
+
+    <main class="chat">
+        <header class="chat-header">
+            <div class="avatar">
+                {% for participant in conversation.participants.all %}
+                    {% if participant.id != request.user.id %}
+                        {{ participant.username|first|upper }}
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            <div>
+                <div class="header-name">
+                    {% for participant in conversation.participants.all %}
+                        {% if participant.id != request.user.id %}
+                            {{ participant.username }}
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="header-status">ML-KEM-768 · AES-256-GCM</div>
+            </div>
+            <div class="chat-menu-container">
+                <button
+                    type="button"
+                    id="more-options-button"
+                    class="more-options-button"
+                    aria-label="More conversation options"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-controls="conversation-menu"
+                    title="More options"
+                >⋮</button>
+                <div id="conversation-menu" class="conversation-menu" hidden>
+                    <button type="button" id="clear-conversation-button" class="danger">
+                        Clear conversation
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <section class="messages" id="messages" aria-live="polite">
+            <div class="notice">
+                Messages are encrypted in the browser. Your private key should
+                remain on your device. Verify recipient keys before relying on
+                this chat for sensitive communication.
+            </div>
+
+            {% for message in messages %}
+                <div class="message-row {% if message.sender_user_id == request.user.id %}mine{% else %}theirs{% endif %}">
+                    <div class="bubble">
+                        <div class="sender">{{ message.sender }}</div>
+                        <div class="message-content">
+                            {% if message.encrypted_content %}
+                                Encrypted message. Decryption/display is not connected yet.
+                            {% else %}
+                                {{ message.content }}
+                            {% endif %}
+                        </div>
+                        <div class="timestamp">
+                            {{ message.created_at|date:"M j, H:i" }}
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="empty-messages" id="empty-messages">
+                    <strong>No messages yet</strong><br>
+                    Send an encrypted message to begin.
+                </div>
+            {% endfor %}
+        </section>
+
+        <form class="composer" id="message-form">
+            {% csrf_token %}
+
+            <div class="composer-row">
+                <input
+                    type="password"
+                    id="key-passphrase"
+                    placeholder="Private-key passphrase (12+ characters)"
+                    minlength="12"
+                    autocomplete="current-password"
+                    required
+                >
+                <button type="button" id="unlock-button">Unlock key</button>
+            </div>
+
+            <div class="composer-row" style="margin-top: 10px;">
+                <input
+                    type="text"
+                    id="message-input"
+                    placeholder="Unlock your key to enable messaging"
+                    maxlength="2000"
+                    autocomplete="off"
+                    required
+                    disabled
+                >
+                <button type="submit" id="send-button" disabled>Send</button>
+            </div>
+
+            <div class="composer-note" id="encryption-status" role="status">
+                Your local PQC key is locked.
+            </div>
+        </form>
+    </main>
+</div>
+
+<script type="module">
+    import {
+        getOrCreatePqcKeyPair,
+        encryptMessage,
+        decryptMessage
+    } from "{% static 'chat/dist/crypto.mjs' %}?v=4";
+
+    const page = document.body;
+    const conversationId = page.dataset.conversationId;
+    const recipientId = page.dataset.recipientId;
+    const currentUserId = Number(page.dataset.userId);
+
+    const form = document.getElementById("message-form");
+    const passphraseInput = document.getElementById("key-passphrase");
+    const unlockButton = document.getElementById("unlock-button");
+    const messageInput = document.getElementById("message-input");
+    const sendButton = document.getElementById("send-button");
+    const status = document.getElementById("encryption-status");
+    const messageArea = document.getElementById("messages");
+    const moreOptionsButton = document.getElementById("more-options-button");
+    const conversationMenu = document.getElementById("conversation-menu");
+    const clearConversationButton = document.getElementById("clear-conversation-button");
+    const csrfToken = form.querySelector(
+        'input[name="csrfmiddlewaretoken"]'
+    ).value;
+
+    let keyPair = null;
+    let recipientPublicKey = null;
+    let busy = false;
+    let keyRegistrationConflict = false;
+    let loadingMessages = false;
+    let initialRenderCompleted = false;
+    const renderedMessageIds = new Set();
+
+    function setStatus(message) {
+        status.textContent = message;
+    }
+
+    function bytesToBase64(bytes) {
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode(
+                ...bytes.subarray(i, i + 0x8000)
+            );
+        }
+        return btoa(binary);
+    }
+
+    async function responseJson(response) {
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(
+                data.error || `Request failed (${response.status}).`
+            );
+        }
+        return data;
+    }
+
+    function clearServerRenderedPlaceholders() {
+        for (const child of Array.from(messageArea.children)) {
+            if (!child.classList.contains("notice")) {
+                child.remove();
+            }
+        }
+    }
+
+    function formatTimestamp(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return date.toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+        });
+    }
+
+    function showEmptyState() {
+        if (document.getElementById("empty-messages")) return;
+        const empty = document.createElement("div");
+        empty.className = "empty-messages";
+        empty.id = "empty-messages";
+        empty.textContent = "No messages yet. Send an encrypted message to begin.";
+        messageArea.appendChild(empty);
+    }
+
+    async function postJson(url) {
+        const response = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "X-CSRFToken": csrfToken }
+        });
+        return responseJson(response);
+    }
+
+    async function loadAndRenderMessages() {
+        if (!keyPair?.secretKey || loadingMessages) return;
+
+        loadingMessages = true;
+        let newMessagesCount = 0;
+
+        try {
+            const response = await fetch(
+                `/conversation/${encodeURIComponent(conversationId)}/messages/`,
+                { credentials: "same-origin" }
+            );
+            const data = await responseJson(response);
+
+            if (!Array.isArray(data.messages)) {
+                throw new Error("The messages response has an invalid format.");
+            }
+            if (data.messages.length === 0) {
+                const existingRows = messageArea.querySelectorAll(".message-row");
+                existingRows.forEach(row => row.remove());
+                showEmptyState();
+            } else {
+                document.getElementById("empty-messages")?.remove();
+            }
+
+            // On the first successful fetch, remove the server's placeholder
+            // rows but preserve the privacy/security notice.
+            if (!initialRenderCompleted) {
+                clearServerRenderedPlaceholders();
+                initialRenderCompleted = true;
+            }
+
+            for (const message of data.messages) {
+                const messageId = String(message.id);
+
+                // Each message is decrypted at most once per unlock session.
+                // This prevents repeated console warnings on every poll.
+                if (renderedMessageIds.has(messageId)) continue;
+
+                const isMine = Number(message.sender_user_id) === currentUserId;
+                const row = document.createElement("div");
+                row.className = `message-row ${isMine ? "mine" : "theirs"}`;
+
+                const bubble = document.createElement("div");
+                bubble.className = "bubble";
+
+                const sender = document.createElement("div");
+                sender.className = "sender";
+                sender.textContent = message.sender || "Unknown sender";
+
+                const content = document.createElement("div");
+                content.className = "message-content";
+
+                const timestamp = document.createElement("div");
+                timestamp.className = "timestamp";
+                timestamp.textContent = formatTimestamp(message.created_at);
+
+                try {
+                    if (isMine) {
+                        if (!message.sender_copy) {
+                            content.textContent =
+                                "This older message has no encrypted sender copy.";
+                        } else {
+                            content.textContent = await decryptMessage(
+                                keyPair.secretKey,
+                                message.sender_copy
+                            );
+                        }
+                    } else {
+                        content.textContent = await decryptMessage(
+                            keyPair.secretKey,
+                            message
+                        );
+                    }
+                } catch (error) {
+                    // Log only the message ID and direction, never keys or plaintext.
+                    console.warn(
+                        isMine
+                            ? "Sender-copy decryption failed for message ID:"
+                            : "Recipient-message decryption failed for message ID:",
+                        message.id
+                    );
+                    content.textContent = isMine
+                        ? "Unable to decrypt your saved message copy. The local private key may not match the key used for this message."
+                        : "Unable to decrypt this message. The local private key may not match the recipient key used when it was sent.";
+                }
+
+                bubble.appendChild(sender);
+                bubble.appendChild(content);
+                if (timestamp.textContent) bubble.appendChild(timestamp);
+
+                // Show a clearly visible Unsend button only on the current user's messages.
+                if (isMine) {
+                    const actions = document.createElement("div");
+                    actions.className = "message-actions";
+
+                    const unsendButton = document.createElement("button");
+                    unsendButton.type = "button";
+                    unsendButton.className = "message-unsend-button";
+                    unsendButton.textContent = "Unsend";
+                    unsendButton.setAttribute("aria-label", "Unsend this message for everyone");
+                    unsendButton.addEventListener("click", async () => {
+                        const confirmed = window.confirm(
+                            "Unsend this message for everyone? This permanently deletes it."
+                        );
+                        if (!confirmed) return;
+
+                        unsendButton.disabled = true;
+                        try {
+                            await postJson(
+                                `/conversation/${encodeURIComponent(conversationId)}` +
+                                `/messages/${encodeURIComponent(message.id)}/unsend/`
+                            );
+                            renderedMessageIds.delete(messageId);
+                            row.remove();
+                            if (!messageArea.querySelector(".message-row")) showEmptyState();
+                            setStatus("Message unsent for everyone.");
+                        } catch (error) {
+                            console.error("Unsend failed:", error);
+                            setStatus(error.message || "Could not unsend message.");
+                            unsendButton.disabled = false;
+                        }
+                    });
+
+                    actions.appendChild(unsendButton);
+                    bubble.appendChild(actions);
+                }
+
+                row.appendChild(bubble);
+                messageArea.appendChild(row);
+
+                // Cache both successful and failed attempts so polling does not
+                // repeatedly retry the same message while this key is unlocked.
+                renderedMessageIds.add(messageId);
+                newMessagesCount += 1;
+            }
+
+            if (!initialRenderCompleted || newMessagesCount > 0) {
+                setStatus(`Loaded ${data.messages.length} message(s).`);
+            }
+            if (newMessagesCount > 0) {
+                messageArea.scrollTop = messageArea.scrollHeight;
+            }
+        } catch (error) {
+            console.error("Could not load messages:", error);
+            setStatus(
+                "Messages could not be loaded. " + (error.message || "")
+            );
+        } finally {
+            loadingMessages = false;
+        }
+    }
+
+    async function unlockAndPrepare() {
+        if (busy) return;
+
+        busy = true;
+        unlockButton.disabled = true;
+        sendButton.disabled = true;
+        messageInput.disabled = true;
+        keyPair = null;
+        recipientPublicKey = null;
+        keyRegistrationConflict = false;
+        renderedMessageIds.clear();
+        initialRenderCompleted = false;
+
+        try {
+            const passphrase = passphraseInput.value;
+            if (passphrase.length < 12) {
+                throw new Error("Use a passphrase with at least 12 characters.");
+            }
+
+            setStatus("Unlocking your local key…");
+            keyPair = await getOrCreatePqcKeyPair(passphrase);
+            const fingerprintBytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", keyPair.publicKey)
+);
+
+const localFingerprint = Array.from(fingerprintBytes)
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 24);
+
+console.info("PQC KEY CHECK:", {
+    username: page.dataset.username,
+    fingerprint: localFingerprint
+});
+
+            setStatus("Checking your registered public key…");
+            const registrationResponse = await fetch("/keys/register/", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken
+                },
+                body: JSON.stringify({
+                    algorithm: "ML-KEM-768",
+                    public_key: bytesToBase64(keyPair.publicKey)
+                })
+            });
+
+            if (registrationResponse.status === 409) {
+                // Preserve the local key for recovery attempts, but never send
+                // messages while this local key differs from the registered key.
+                keyRegistrationConflict = true;
+                setStatus(
+                    "Recovery mode: this local key differs from the registered key. " +
+                    "Sending is disabled; attempting to decrypt existing messages."
+                );
+            } else {
+                await responseJson(registrationResponse);
+            }
+
+            if (!recipientId) {
+                throw new Error("No other participant was found.");
+            }
+
+            setStatus("Retrieving recipient public key…");
+            const keyResponse = await fetch(
+                `/keys/${encodeURIComponent(recipientId)}/`,
+                { credentials: "same-origin" }
+            );
+            const keyData = await responseJson(keyResponse);
+
+            if (keyData.algorithm !== "ML-KEM-768") {
+                throw new Error("Unsupported recipient key algorithm.");
+            }
+
+            const recipientKeyBytes = atob(keyData.public_key);
+            if (recipientKeyBytes.length !== 1184) {
+                throw new Error("Recipient public key has an invalid length.");
+            }
+
+            recipientPublicKey = keyData.public_key;
+            await loadAndRenderMessages();
+
+            if (keyRegistrationConflict) {
+                setStatus(
+                    "Recovery mode: sending is disabled because this local key " +
+                    "differs from the registered key. Existing messages were tested with this local key."
+                );
+            } else {
+                setStatus(
+                    "Key ready. Verify the recipient's key fingerprint out of band before trusting this conversation."
+                );
+            }
+
+            if (!keyRegistrationConflict) messageInput.focus();
+        } catch (error) {
+            console.error("Unable to prepare encryption:", error);
+            keyPair = null;
+            recipientPublicKey = null;
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            setStatus("Encryption error: " + (error?.message || String(error)));
+        } finally {
+            busy = false;
+            unlockButton.disabled = false;
+            messageInput.disabled = !keyPair || keyRegistrationConflict;
+            sendButton.disabled =
+                !keyPair || !recipientPublicKey || keyRegistrationConflict;
+        }
+    }
+
+    moreOptionsButton.addEventListener("click", event => {
+        event.stopPropagation();
+        conversationMenu.hidden = !conversationMenu.hidden;
+        moreOptionsButton.setAttribute("aria-expanded", String(!conversationMenu.hidden));
+    });
+
+    document.addEventListener("click", event => {
+        if (!conversationMenu.contains(event.target) && event.target !== moreOptionsButton) {
+            conversationMenu.hidden = true;
+            moreOptionsButton.setAttribute("aria-expanded", "false");
+        }
+        document.querySelectorAll(".message-actions-menu").forEach(menu => {
+            if (!menu.parentElement?.contains(event.target)) menu.hidden = true;
+        });
+    });
+
+    clearConversationButton.addEventListener("click", async () => {
+        conversationMenu.hidden = true;
+        moreOptionsButton.setAttribute("aria-expanded", "false");
+        const confirmed = window.confirm(
+            "Clear all messages in this conversation for both participants? This cannot be undone."
+        );
+        if (!confirmed) return;
+
+        clearConversationButton.disabled = true;
+        try {
+            const result = await postJson(
+                `/conversation/${encodeURIComponent(conversationId)}/clear/`
+            );
+            for (const child of Array.from(messageArea.children)) {
+                if (!child.classList.contains("notice")) child.remove();
+            }
+            renderedMessageIds.clear();
+            initialRenderCompleted = true;
+            showEmptyState();
+            setStatus(`Conversation cleared. ${result.deleted_count} message record(s) removed.`);
+        } catch (error) {
+            console.error("Clear conversation failed:", error);
+            setStatus(error.message || "Could not clear conversation.");
+        } finally {
+            clearConversationButton.disabled = false;
+        }
+    });
+
+    unlockButton.addEventListener("click", unlockAndPrepare);
+
+    passphraseInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            unlockAndPrepare();
+        }
+    });
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const plaintext = messageInput.value;
+        if (
+            !plaintext.trim() ||
+            !keyPair ||
+            !recipientPublicKey ||
+            busy ||
+            keyRegistrationConflict
+        ) {
+            return;
+        }
+
+        busy = true;
+        sendButton.disabled = true;
+        unlockButton.disabled = true;
+        setStatus("Encrypting message in your browser…");
+
+        try {
+            // Encrypt one package for the recipient.
+            const encryptedPackage = await encryptMessage(
+                recipientPublicKey,
+                plaintext
+            );
+
+            // Encrypt another package for the sender's own message history.
+            const senderCopyPackage = await encryptMessage(
+                bytesToBase64(keyPair.publicKey),
+                plaintext
+            );
+
+            setStatus("Sending encrypted packages to Django…");
+            const response = await fetch(
+                `/conversation/${encodeURIComponent(conversationId)}/send/`,
+                {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfToken
+                    },
+                    body: JSON.stringify({
+                        ...encryptedPackage,
+                        sender_copy: senderCopyPackage
+                    })
+                }
+            );
+
+            const stored = await responseJson(response);
+            messageInput.value = "";
+            setStatus(`Encrypted message ${stored.message_id} stored. Loading messages…`);
+            await loadAndRenderMessages();
+        } catch (error) {
+            console.error("Message send failed:", error);
+            setStatus(error?.message || "Message could not be sent.");
+        } finally {
+            busy = false;
+            unlockButton.disabled = false;
+            messageInput.disabled = !keyPair || keyRegistrationConflict;
+            sendButton.disabled =
+                !keyPair || !recipientPublicKey || keyRegistrationConflict;
+        }
+    });
+
+    messageArea.scrollTop = messageArea.scrollHeight;
+
+    // Poll for new messages every five seconds. Existing message IDs are cached,
+    // so decryption failures are not repeatedly retried on every poll.
+    setInterval(() => {
+        if (keyPair && !busy && !document.hidden) {
+            loadAndRenderMessages();
+        }
+    }, 5000);
+</script>
+</body>
+</html>

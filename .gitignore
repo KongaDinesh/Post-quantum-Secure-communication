@@ -1,0 +1,25 @@
+
+# Python virtual environments and caches
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+
+# Local databases and backups
+*.sqlite3
+*.sqlite3-*
+*-backup-*.sqlite3
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local development files
+.vscode/
+node_modules/
+*.backup.py
+*.backup.html
+
+# Older nested project copy
+/pqc-chat/

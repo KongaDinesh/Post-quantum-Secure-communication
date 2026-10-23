@@ -1,0 +1,378 @@
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PQC Secure Chat</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            color: #263238;
+            background: #f3f5f8;
+        }
+
+        .topbar {
+            height: 66px;
+            padding: 0 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #ffffff;
+            border-bottom: 1px solid #e2e6ed;
+        }
+
+        .brand {
+            font-size: 21px;
+            font-weight: 700;
+            color: #263b59;
+        }
+
+        .account {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            font-size: 14px;
+        }
+
+        .logout {
+            background: white;
+            border: 1px solid #d6dce5;
+            color: #34445c;
+            padding: 9px 13px;
+            border-radius: 7px;
+            cursor: pointer;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
+            max-width: 1500px;
+            height: calc(100vh - 66px);
+            margin: auto;
+            background: white;
+            border-left: 1px solid #e2e6ed;
+            border-right: 1px solid #e2e6ed;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border-right: 1px solid #e2e6ed;
+            background: #ffffff;
+        }
+
+        .sidebar-heading {
+            padding: 24px 20px 7px;
+            font-size: 21px;
+            font-weight: 700;
+            color: #263b59;
+        }
+
+        .sidebar-subtitle {
+            padding: 0 20px 18px;
+            color: #788494;
+            font-size: 13px;
+        }
+
+        .search-wrap {
+            padding: 0 14px 15px;
+        }
+
+        .search {
+            width: 100%;
+            border: 1px solid #e0e5ec;
+            background: #f7f8fa;
+            border-radius: 8px;
+            padding: 12px;
+            outline-color: #5478b5;
+            font-size: 14px;
+        }
+
+        .people-list {
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .person {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 15px 17px;
+            text-decoration: none;
+            color: inherit;
+            border-top: 1px solid #f0f2f5;
+            transition: background 0.15s;
+        }
+
+        .person:hover {
+            background: #f2f5fa;
+        }
+
+        .avatar {
+            width: 45px;
+            height: 45px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: #e8edf5;
+            color: #3d577f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 17px;
+        }
+
+        .person-info {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .person-name {
+            font-size: 14px;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+
+        .person-description {
+            color: #8490a0;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .arrow {
+            color: #73839b;
+            font-size: 20px;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 25px 18px;
+            color: #7b8795;
+            font-size: 14px;
+        }
+
+        .chat-panel {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            background: #fafbfc;
+        }
+
+        .chat-header {
+            height: 76px;
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            padding: 0 24px;
+            background: white;
+            border-bottom: 1px solid #e2e6ed;
+        }
+
+        .chat-header .avatar {
+            background: #edf1f7;
+        }
+
+        .chat-title {
+            font-weight: 600;
+            font-size: 16px;
+            color: #263b59;
+        }
+
+        .chat-subtitle {
+            margin-top: 5px;
+            color: #8290a1;
+            font-size: 12px;
+        }
+
+        .welcome-area {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .welcome-content {
+            max-width: 410px;
+        }
+
+        .lock-icon {
+            width: 74px;
+            height: 74px;
+            margin: 0 auto 20px;
+            border-radius: 22px;
+            background: #e9eef6;
+            color: #405d89;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+        }
+
+        .welcome-content h2 {
+            color: #344761;
+            font-size: 23px;
+            font-weight: 600;
+        }
+
+        .welcome-content p {
+            color: #7c8999;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .security-note {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 9px 13px;
+            border-radius: 7px;
+            background: #edf2f8;
+            color: #506785;
+            font-size: 12px;
+        }
+
+        @media (max-width: 650px) {
+            .topbar { padding: 0 13px; }
+            .brand { font-size: 17px; }
+            .account { gap: 8px; font-size: 12px; }
+            .workspace { grid-template-columns: 115px minmax(0, 1fr); }
+            .sidebar-heading { padding: 18px 10px 6px; font-size: 17px; }
+            .sidebar-subtitle { padding: 0 10px 12px; font-size: 11px; }
+            .search-wrap { padding: 0 7px 10px; }
+            .search { padding: 9px 6px; font-size: 12px; }
+            .person { padding: 13px 8px; gap: 7px; }
+            .avatar { width: 34px; height: 34px; font-size: 13px; }
+            .person-name { font-size: 12px; }
+            .person-description, .arrow { display: none; }
+            .chat-header { padding: 0 12px; }
+            .welcome-area { padding: 12px; }
+            .welcome-content h2 { font-size: 18px; }
+            .welcome-content p { font-size: 12px; }
+        }
+    </style>
+</head>
+
+<body>
+<header class="topbar">
+    <div class="brand">🔐 PQC Secure Chat</div>
+
+    <div class="account">
+        <span>{{ request.user.username }}</span>
+        <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="logout">Log out</button>
+        </form>
+    </div>
+</header>
+
+<main class="workspace">
+    <!-- LEFT: ONE LIST OF PEOPLE -->
+    <aside class="sidebar">
+        <div class="sidebar-heading">People</div>
+        <div class="sidebar-subtitle">Select someone to chat with</div>
+
+        <div class="search-wrap">
+            <input
+                type="search"
+                id="user-search"
+                class="search"
+                placeholder="Search people..."
+                autocomplete="off"
+            >
+        </div>
+
+        <div class="people-list" id="people-list">
+            {% for person in users %}
+                {% if person.id != request.user.id %}
+                    <a
+                        class="person"
+                        data-username="{{ person.username|lower }}"
+                        href="{% url 'start_conversation' person.id %}"
+                    >
+                        <div class="avatar">
+                            {{ person.username|first|upper }}
+                        </div>
+
+                        <div class="person-info">
+                            <div class="person-name">
+                                {{ person.username }}
+                            </div>
+                            <div class="person-description">
+                                Open private chat
+                            </div>
+                        </div>
+
+                        <span class="arrow">›</span>
+                    </a>
+                {% endif %}
+            {% empty %}
+                <div class="empty">No other registered users found.</div>
+            {% endfor %}
+
+            <div class="empty" id="no-users" hidden>
+                No matching people found.
+            </div>
+        </div>
+    </aside>
+
+    <!-- RIGHT: CHAT PLACEHOLDER UNTIL A PERSON IS SELECTED -->
+    <section class="chat-panel">
+        <header class="chat-header">
+            <div class="avatar">🔒</div>
+            <div>
+                <div class="chat-title">Secure conversation</div>
+                <div class="chat-subtitle">
+                    Select a person from the left
+                </div>
+            </div>
+        </header>
+
+        <div class="welcome-area">
+            <div class="welcome-content">
+                <div class="lock-icon">🔐</div>
+                <h2>Your conversations, kept private</h2>
+                <p>
+                    Choose Avinash, Dinesh, or another registered user
+                    from the left panel to open your conversation.
+                </p>
+                <p>
+                    Our project uses ML-KEM-768 for post-quantum
+                    key establishment and AES-256-GCM for message encryption.
+                </p>
+                <span class="security-note">
+                    Encryption and messaging integration in progress
+                </span>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    const searchInput = document.getElementById("user-search");
+    const people = document.querySelectorAll(".person");
+    const noUsers = document.getElementById("no-users");
+
+    searchInput.addEventListener("input", function () {
+        const query = this.value.toLowerCase().trim();
+        let visibleCount = 0;
+
+        people.forEach(person => {
+            const matches = person.dataset.username.includes(query);
+            person.hidden = !matches;
+
+            if (matches) visibleCount++;
+        });
+
+        noUsers.hidden = visibleCount !== 0;
+    });
+</script>
+</body>
+</html>
